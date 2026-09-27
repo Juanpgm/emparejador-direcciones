@@ -349,3 +349,22 @@ by design; the gain shows on the ground-truth smoke test
 as `KR 17 B 41 - 78`, deliberately kept unparseable), overall synthetic recall
 74.80% -> 93.20%, sanity negatives 0 false positives (30/30 true negatives).
 No score in (0.85, 0.9126) was produced on any of the 640 ground-truth pairs.
+
+## 2026-09-26 - Full run
+
+`--full --seed 42 --link-sample 5000` (default `--max-pairs 200000`) on all 330,387 rows, code at `d2759f1`; wall time 980 s. Everything above is history and stays as written; the sample figures above predate commit `5ad3eb4` (street/complement aliases, no-hash form), so a difference of +-1 to 2 rows is expected.
+
+| Table | Full run |
+|---|---|
+| A. Parse coverage | 328,629 / 330,387 = 99.47% (1,758 failures; sample-run appendix: 328,628 / 1,759). `no_hash_separator` 117 (was 118): the unambiguous no-hash form now parses one more row |
+| B. Self-match / symmetry violations | 0 / 328,629 and 0 / 5,721,490 |
+| C. Format-variant recall | 3,582,859 / 3,582,859 = 100.00% (0 misses) |
+| D. True-difference kinds as designed | 27 / 27 at 100%; 0 of 5,237,047 true-difference mutants at or above 0.90 (scores: 0.0, 0.85, 0.70, 0.6141 x41, 0.595 x1) |
+| Dead band (0.85, 0.9126) | empty: no score inside it in D, E or F |
+| E1 / E3 | different plate 0 / 198,766; complements differ 0 / 7,784; E3 `same_via_same_plate_other_cross` 28 / 114,891 (cross type only, 27 + 1 with a complement); `same_cross_same_plate_other_via` 0 / 118,397 |
+| F. Threshold 0.90 / 0.95 / 1.00 | tp 3,582,859, fp 0, fn 0, tn 5,237,047 (P = R = 1.0); 0.85: P 0.6444; 0.70: P 0.6077 |
+| G. Throughput | 24,553 pairs/s (40.7 us/pair); parse 14.8 us/address |
+| H. Linking (5,000 exact and 5,000 variant) | top-1 own 99.94% both, own missing 0, ambiguous 0.16% (3 tie-wrong-first), false best 0, no best 0 |
+| Scale (`AddressIndex`, 328,629 records) | build 5.4 s including parsing; 178,577 blocks, largest 293; RSS 157 -> 324 MiB standalone (harness process peak 646 MiB with the full evaluation data); about 10,400 queries/s; per-query latency over 1,000 random queries: p50 0.04 ms, p95 0.38 ms, max 3.2 ms |
+
+Only new value: 1 mutant at 0.595 (0.85 x 0.7): `K 100 1 E O # - T` -> `KR 100 1 E # - T` (`via_quadrant_remove`; the `E` flips between suffix and quadrant reading), far below the threshold. No new failure class.
