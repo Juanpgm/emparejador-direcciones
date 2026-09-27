@@ -20,8 +20,8 @@ example a unit vs. its bare building) or a spelling the grammar never saw.
 
 | File | Content |
 |---|---|
-| `data/groundtruth/synthetic_positives.jsonl` | `{pair_id, addr_a, addr_b, same_door:true, tier:"synthetic", transform, source_direccion}`. addr_b is a mutated spelling of a real address, made with rules inside the builder. Every rule keeps all digits (checked). Rationale per tag: `MANIFEST.json`. Tags are either known-vocabulary (spellings the parser was built to know) or `novel_*` (plausible spellings outside the parser tables: `APT`/`APART` for AP, `LOC` for LC, `OFIC`, `EDIF`/`EDF`, `BLOQ`, `CARR`/`CRRA`, `AVDA`/`AVEN`, `DIAG`, `NUMERO` instead of `#`). `hash_absent` is only applied to single-number streets, where dropping `#` cannot change the split. |
-| `data/groundtruth/candidates_to_label.jsonl` | `{pair_id, addr_a, addr_b, stratum, npn_a, npn_b, comuna_a, comuna_b, barrio_a, barrio_b, same_manzana}`, about 60 per stratum. NO scores. The stratum lives only here. |
+| `data/groundtruth/synthetic_positives.jsonl` | `{pair_id, addr_a, addr_b, same_door:true, tier:"synthetic", transform, source_direccion}`. addr_b is a mutated spelling of a real address, made with rules inside the builder. Every rule keeps all digits (checked). Rationale per tag: `MANIFEST.json`. Tags are either known-vocabulary (spellings the parser was built to know) or `novel_*` (plausible spellings that were outside the parser tables when the set was designed, now learned by the parser and kept as regression coverage: `APT`/`APART` for AP, `LOC` for LC, `OFIC`, `EDIF`/`EDF`, `BLOQ`, `CARR`/`CRRA`, `AVDA`/`AVEN`, `DIAG`, `NUMERO` instead of `#`). `hash_absent` is only applied to streets with one digit run; the parser accepts the no-`#` form only for the strictest shape (`TYPE N N - N`), so the multi-token variants (`KR 17 B 41 - 78`) remain deliberately unparseable. |
+| `data/groundtruth/candidates_to_label.jsonl` | `{pair_id, addr_a, addr_b, stratum, npn_a, npn_b, comuna_a, comuna_b, barrio_a, barrio_b, same_manzana}`, about 60 per stratum. NO scores. The stratum lives only here: it is for the analyst and must NOT be given to labelers. |
 | `data/groundtruth/random_negatives.jsonl` | `{..., same_door:false, tier:"sanity"}` random pairs from different comunas. |
 | `data/groundtruth/label_sheet.csv` | The sheet to fill in. Columns: `pair_id, addr_a, addr_b, query_a, query_b, comuna_a, comuna_b, barrio_a, barrio_b, npn_a, npn_b, same_door, same_unit, evidence_source, notes`. Rows are shuffled (seeded, deterministic) and the stratum column is deliberately absent so the labeler is not anchored; join back to the strata through `pair_id`. `query_a`/`query_b` are the address plus `, Cali, Valle del Cauca, Colombia`. `barrio_*` is whatever the cadastre stores (a code in the current parquet). UTF-8, no BOM. |
 | `data/groundtruth/MANIFEST.json` | seed, counts per stratum/transform, quota shortfalls, score-bin counts per stratum/tier, sha256 of each file. |
@@ -99,16 +99,24 @@ Any CSV or JSONL with at least `pair_id` and `same_door` (and optionally
 columns are ignored. In JSONL, the booleans `true` / `false` count as `yes` /
 `no`. The old single `label` column is rejected with a clear error (it mixed
 door and unit). Duplicate `pair_id`s are an error; unknown ids are warnings;
-blank labels count as not labeled (coverage is reported).
+blank labels count as not labeled (coverage is reported). A labels file
+without a `same_door` column (for example the typo `same-door`) is an error
+(exit code 2), like a missing `pair_id`; in JSONL every row needs the
+`same_door` key (`null` means blank).
 
 Validation: `same_unit` of `yes`/`no`/`unsure` on a pair with `same_door=no`
-is inconsistent. The evaluator prints a WARNING naming the pairs, keeps the
+is inconsistent; an unrecognised `same_unit` value (for example `maybe`) is
+counted as invalid and named in a WARNING when `same_door` is `yes` or `no`. The evaluator prints a WARNING naming the pairs, keeps the
 door label and ignores that unit value. `same_unit` on a pair whose
 `same_door` is unsure or blank is ignored too (the pair is not scored).
 
 ## Evaluating
 
-`python tools/eval_groundtruth.py --labels label_sheet.csv --pairs-dir data/groundtruth [--scores-dir data/groundtruth_private] [--threshold 0.90] [--json-out r.json]`
+Hand labelers ONLY `data/groundtruth/label_sheet.csv` (a copy of it). Never
+give them `candidates_to_label.jsonl` (it holds the strata) or the private
+sidecar. Evaluate with the filled copy:
+
+`python tools/eval_groundtruth.py --labels label_sheet_filled.csv --pairs-dir data/groundtruth [--scores-dir data/groundtruth_private] [--threshold 0.90] [--json-out r.json]`
 
 `--labels` is optional; without it only the synthetic positives and sanity
 negatives are scored. By default the pairs are scored live with the matcher,

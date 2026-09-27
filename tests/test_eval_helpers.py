@@ -384,7 +384,12 @@ class TestFailureCause:
         assert ev.failure_cause(value) == "empty_or_non_text"
 
     def test_no_hash(self) -> None:
-        assert ev.failure_cause("KR 1 9 - 80") == "no_hash_separator"
+        # Ambiguous split (more than one number per street): never guessed.
+        assert ev.failure_cause("KR 26 G 5 73 - 13") == "no_hash_separator"
+        assert ev.failure_cause("KR 1 9") == "no_hash_separator"
+
+    def test_unambiguous_no_hash_is_now_parsed(self) -> None:
+        assert ev.failure_cause("KR 1 9 - 80") == "parses_ok"
 
     def test_multiple_addresses(self) -> None:
         assert ev.failure_cause("KR 1 # 9 - 80 CL 5 # 3 - 2") == "multiple_addresses"

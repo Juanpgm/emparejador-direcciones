@@ -95,15 +95,31 @@ class TestSplitAddress:
     def test_empty_none_and_non_string_addresses_are_rejected(self, bad):
         assert gt.split_address(bad) is None
 
-    def test_huge_input_is_rejected_quickly(self):
-        huge = "CL " + "A " * 50_000 + "# 1 - 2"
-        assert gt.split_address(huge) is None
+    def test_input_over_the_length_cap_is_rejected_without_running_the_regex(self):
+        # Rejection is a constant-time length check, not regex work.
+        assert len("CL " + "A " * 50_000 + "# 1 - 2") > gt.MAX_ADDRESS_LEN
+        assert gt.split_address("CL " + "A " * 50_000 + "# 1 - 2") is None
         assert gt.split_address("CL 5 # " + "9" * 10_000 + " - 1") is None
 
-    def test_unicode_input_does_not_crash(self):
-        assert gt.split_address("CL 5 # 10 – 20") is None or isinstance(gt.split_address("CL 5 # 10 – 20"), dict)
-        assert gt.split_address("ＣＬ ５ ＃ １０ － ２０") is None
+    def test_pathological_input_just_under_the_cap_stays_fast(self):
+        import time
 
+        near_cap = "CL 5 # 10 - 20 " + "A" * (gt.MAX_ADDRESS_LEN - 15)
+        assert len(near_cap) <= gt.MAX_ADDRESS_LEN
+        for text in (near_cap, "CL " + "1 " * (gt.MAX_ADDRESS_LEN // 2 - 5), "CL 5 # " + "9" * (gt.MAX_ADDRESS_LEN - 20)):
+            assert len(text) <= gt.MAX_ADDRESS_LEN
+            start = time.perf_counter()
+            gt.split_address(text)  # result irrelevant here: it must simply return promptly
+            assert time.perf_counter() - start < 0.5
+
+    def test_unicode_dash_is_not_a_canonical_separator(self):
+        # The strict splitter only knows ASCII '-'; the en dash must be what makes it fail.
+        assert gt.split_address("CL 5 # 10 - 20") is not None
+        assert gt.split_address("CL 5 # 10 – 20") is None
+        assert gt.split_address("CL 5 # 10 — 20") is None
+
+    def test_fullwidth_input_is_not_canonical(self):
+        assert gt.split_address("ＣＬ ５ ＃ １０ － ２０") is None
 
 class TestTransforms:
     ADDRS = [
@@ -229,15 +245,18 @@ class TestNovelAliases:
                     assert _digits(out) == _digits(addr) and out != addr
         assert produced > 0
 
-    def test_novel_complement_spellings_are_outside_the_parser_tables_and_keep_meaning(self):
+    def test_novel_complement_spellings_keep_meaning_and_map_to_the_source_kind(self):
         import random
 
         from emparejador.parser import COMPLEMENT_KINDS
 
         reverse = {alias: canonical for canonical, aliases in gt._NOVEL_COMPLEMENT.items() for alias in aliases}
-        for aliases in gt._NOVEL_COMPLEMENT.values():
+        # These spellings were unknown when the set was designed; the parser
+        # has since learned them, so they must now all map to the SAME kind
+        # the builder derived them from.
+        for canonical, aliases in gt._NOVEL_COMPLEMENT.items():
             for alias in aliases:
-                assert alias.rstrip(".") not in COMPLEMENT_KINDS, alias
+                assert COMPLEMENT_KINDS[alias.rstrip(".")] == canonical, alias
         seen = set()
         for addr in self.ADDRS:
             for seed in range(20):
@@ -249,17 +268,24 @@ class TestNovelAliases:
                 seen.update(tok for tok in out.split(" ") if tok in reverse)
         assert {"APT", "LOC"} <= {t.rstrip(".") for t in seen}
 
-    def test_novel_type_spellings_are_outside_the_parser_tables(self):
+    def test_novel_type_spellings_map_to_the_source_type(self):
         from emparejador.parser import VIA_TYPES
 
-        for aliases in gt._NOVEL_TYPE.values():
+        # Learned since the set was designed: each spelling must map to the
+        # same canonical type as the long word it was derived from.
+        # CIRCULAR/CIR/CIRC are the exception: deliberately not aliased
+        # (circular vs circunvalar is ambiguous), so they stay unparseable.
+        for long_word, aliases in gt._NOVEL_TYPE.items():
             for alias in aliases:
-                assert alias not in VIA_TYPES, alias
+                if long_word == "CIRCULAR":
+                    assert alias not in VIA_TYPES, alias
+                else:
+                    assert VIA_TYPES[alias] == VIA_TYPES[long_word], alias
 
     def test_novel_number_word_is_not_a_known_marker(self):
         import random
 
-        assert not set(gt._NOVEL_NUMBER_WORDS) & {"NO", "NRO", "NUM"}
+        assert not set(gt._NOVEL_NUMBER_WORDS) & {"NO", "NRO", "NUM"}  # distinct from the older markers
         out = gt.apply_transform("novel_number_word", "CL 5 # 10 - 20", random.Random(0))
         assert out == "CL 5 NUMERO 10 - 20"
 

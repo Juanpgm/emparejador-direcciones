@@ -205,6 +205,11 @@ def read_labels(path: str | Path) -> tuple[dict[str, str | None], dict[str, Any]
                 raise GroundTruthError(f"{path}: line {number} is not a JSON object")
             if "label" in row and "same_door" not in row:
                 raise GroundTruthError(f"{path}: line {number}: {_LEGACY_MSG}")
+            if "same_door" not in row:
+                raise GroundTruthError(
+                    f"{path}: line {number}: missing required key 'same_door' (found {sorted(row)}); "
+                    "use null or an empty value for a blank label"
+                )
             add(row.get("pair_id"), row.get("same_door"), row.get("same_unit"))
     else:
         if text.strip():
@@ -215,8 +220,10 @@ def read_labels(path: str | Path) -> tuple[dict[str, str | None], dict[str, Any]
                 raise GroundTruthError(f"{path}: missing required column 'pair_id' (found {columns})")
             if "label" in columns and "same_door" not in columns:
                 raise GroundTruthError(f"{path}: {_LEGACY_MSG}")
+            if "same_door" not in columns:
+                raise GroundTruthError(f"{path}: missing required column 'same_door' (found {columns})")
             id_col = columns.index("pair_id")
-            door_col = columns.index("same_door") if "same_door" in columns else None
+            door_col = columns.index("same_door")
             unit_col = columns.index("same_unit") if "same_unit" in columns else None
 
             def cell(row: list[str], col: int | None) -> str:
@@ -365,6 +372,7 @@ def evaluate(
     def bucket(name: str) -> dict[str, int]:
         return counts.setdefault(name, _empty())
 
+    invalid_unit_ids: list[str] = []
     human = {"pairs": 0, "labeled": 0, "unsure": 0, "blank": 0, "invalid": 0}
     unit_cov = {"yes": 0, "no": 0, "unsure": 0, "n/a": 0, "invalid": 0, "ignored_door_no": 0}
     inconsistent: list[str] = []
@@ -396,12 +404,14 @@ def evaluate(
                 continue
             human["labeled"] += 1
             raw_unit = units.get(pid)
-            if label == "no":
+            if pid in invalid_units:
+                # Counted and reported for both door labels: never dropped silently.
+                unit_cov["invalid"] += 1
+                invalid_unit_ids.append(pid)
+            elif label == "no":
                 if raw_unit in ("yes", "no", "unsure"):
                     inconsistent.append(pid)
                     unit_cov["ignored_door_no"] += 1
-            elif pid in invalid_units:
-                unit_cov["invalid"] += 1
             elif raw_unit in ("yes", "no", "unsure"):
                 unit_cov[raw_unit] += 1
                 unit_label = raw_unit
@@ -434,6 +444,11 @@ def evaluate(
         warnings.append(
             f"{len(inconsistent)} pair(s) have same_door=no but a same_unit value; same_unit must be n/a or "
             f"blank there, so it was ignored (door label kept): {', '.join(sorted(inconsistent)[:5])}"
+        )
+    if invalid_unit_ids:
+        warnings.append(
+            f"{len(invalid_unit_ids)} pair(s) have an invalid same_unit value (counted as invalid, not scored): "
+            f"{', '.join(sorted(invalid_unit_ids)[:5])}"
         )
     if frozen_used:
         warnings.append(f"{frozen_used} pair(s) scored from the frozen sidecar (not the live matcher)")
@@ -559,7 +574,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         lines += [
             "",
             "Known-vocab recall is NOT independent evidence: those spellings are the ones the parser was built to "
-            "know. Only the novel_* tags (spellings outside the parser tables) say something about unseen input.",
+            "know. Only the novel_* tags (spellings that were outside the parser tables when the set was designed) say something about unseen input; once the parser learns them they become regression coverage.",
             "",
             "## Synthetic recall by transform", "",
             "| transform | n | TP | FN | recall |", "|---|---|---|---|---|",

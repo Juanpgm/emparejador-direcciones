@@ -189,6 +189,34 @@ class TestReadLabels:
         with pytest.raises(ev.GroundTruthError, match="pair_id"):
             ev.read_labels(p)
 
+    @pytest.mark.parametrize("header", ["pair_id,same-door", "pair_id,samedoor", "pair_id,door", "pair_id,same_unit"])
+    def test_missing_same_door_column_is_an_error(self, tmp_path, header):
+        p = write_csv(tmp_path / "l.csv", header + "\na,yes\n")
+        with pytest.raises(ev.GroundTruthError, match="same_door"):
+            ev.read_labels(p)
+
+    def test_header_only_file_without_same_door_is_still_an_error(self, tmp_path):
+        p = write_csv(tmp_path / "l.csv", "pair_id,same-door\n")
+        with pytest.raises(ev.GroundTruthError, match="same_door"):
+            ev.read_labels(p)
+
+    def test_jsonl_row_without_same_door_key_is_an_error(self, tmp_path):
+        p = tmp_path / "l.jsonl"
+        p.write_text('{"pair_id":"a","same-door":"yes"}\n', encoding="utf-8")
+        with pytest.raises(ev.GroundTruthError, match="same_door"):
+            ev.read_labels(p)
+
+    def test_jsonl_null_same_door_is_blank_not_missing(self, tmp_path):
+        p = tmp_path / "l.jsonl"
+        p.write_text('{"pair_id":"a","same_door":null}\n', encoding="utf-8")
+        assert ev.read_labels(p)[0] == {"a": None}
+
+    def test_main_missing_same_door_exits_2_with_clear_error(self, tmp_path, capsys):
+        d = make_pairs_dir(tmp_path, [cand("c1", SAME)])
+        labels = write_csv(tmp_path / "labels.csv", "pair_id,same-door\nc1,yes\n")
+        assert ev.main(["--labels", str(labels), "--pairs-dir", str(d)]) == 2
+        assert "same_door" in capsys.readouterr().err
+
     def test_row_without_pair_id_is_skipped(self, tmp_path):
         p = write_csv(tmp_path / "l.csv", "pair_id,same_door\n,yes\na,no\n")
         labels, _ = ev.read_labels(p)
@@ -499,6 +527,23 @@ class TestSameDoorVsSameUnit:
     def test_invalid_unit_value_is_counted_not_scored(self, tmp_path):
         r = self._r(tmp_path, [cand("a", SAME)], {"a": "yes"}, {"a": None}, invalid_units={"a": "maybe"})
         assert r["same_unit"]["coverage"]["invalid"] == 1 and r["same_unit"]["overall"]["n"] == 0
+
+    def test_invalid_unit_with_door_no_is_counted_and_warned_not_dropped(self, tmp_path):
+        r = self._r(tmp_path, [cand("a", DIFF)], {"a": "no"}, {"a": None}, invalid_units={"a": "maybe"})
+        assert r["same_unit"]["coverage"]["invalid"] == 1
+        assert any("invalid same_unit" in w and "a" in w for w in r["warnings"])
+        assert r["overall"]["n"] == 1  # the door label still counts
+
+    def test_invalid_unit_with_door_yes_also_warns(self, tmp_path):
+        r = self._r(tmp_path, [cand("a", SAME)], {"a": "yes"}, {"a": None}, invalid_units={"a": "maybe"})
+        assert any("invalid same_unit" in w for w in r["warnings"])
+
+    def test_main_invalid_unit_with_door_no_warns_in_report(self, tmp_path, capsys):
+        d = make_pairs_dir(tmp_path, [cand("c1", DIFF)])
+        labels = write_csv(tmp_path / "labels.csv", "pair_id,same_door,same_unit\nc1,no,maybe\n")
+        assert ev.main(["--labels", str(labels), "--pairs-dir", str(d)]) == 0
+        out = capsys.readouterr().out
+        assert "invalid same_unit" in out and "invalid: 1" in out
 
     def test_all_one_class_unit_labels_report_na_not_zero_division(self, tmp_path):
         r = self._r(tmp_path, [cand("a", SAME)], {"a": "yes"}, {"a": "yes"}, scorer=LO)

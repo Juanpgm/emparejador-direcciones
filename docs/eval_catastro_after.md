@@ -323,3 +323,29 @@ format variant  5000  99.94%    0.00%         0            0.22%      3         
 
 wall time: 88.5s
 ```
+
+## Addendum 2026-09-26: parser vocabulary and no-`#` form
+
+Same command (`--sample 20000 --seed 42 --link-sample 5000`) before and after
+adding the extra via-type/complement aliases (`CARR`, `CRRA`, `AVDA`, `AVEN`,
+`AVE`, `DIAG`, `DIAGO`, `TRANSV`, `TRV`, `APT`, `APART`, `LOC`, `OFIC`, `EDIF`,
+`EDF`, `BLOQ`), `NUMERO` as a `#` marker and the narrow no-`#` form
+(`TYPE N N - N`). The matcher and its penalties are unchanged.
+
+| Metric | Before | After |
+|---|---|---|
+| parse_ok (all rows) | 328628 / 330387 = 99.47% | 328629 / 330387 = 99.47% |
+| falta_separador_hash failures | 118 | 116 (one row now parses, one now fails later on a different note) |
+| Rows whose parse changed (all 330387, old vs new parser) | - | 2 (20000-row sample: 0) |
+| Link, exact address top1_own | 99.94% | 99.94% |
+| Link, format variant top1_own | 99.94% | 99.94% |
+| false_best / no_best / unparseable (link) | 0 / 0 / 0 | 0 / 0 / 0 |
+| Threshold table (0.90, tol 0): tp / fp / fn / tn | 217171 / 0 / 0 / 317382 | unchanged |
+
+The real cadastre almost never uses these spellings, so coverage barely moves
+by design; the gain shows on the ground-truth smoke test
+(`tools/eval_groundtruth.py`, synthetic tier): `novel_*` recall 0/44 -> 44/44,
+`hash_absent` recall 0/14 -> 2/14 (the other 12 are multi-token streets such
+as `KR 17 B 41 - 78`, deliberately kept unparseable), overall synthetic recall
+74.80% -> 93.20%, sanity negatives 0 false positives (30/30 true negatives).
+No score in (0.85, 0.9126) was produced on any of the 640 ground-truth pairs.

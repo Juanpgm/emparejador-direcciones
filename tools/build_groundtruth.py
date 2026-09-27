@@ -164,7 +164,9 @@ _TYPE_SHORT = {
     "DIAGONAL": ("DG", "D"),
     "TRANSVERSAL": ("TV", "T"),
 }
-# Plausible spellings the parser is NOT expected to know (novel vocabulary).
+# Plausible spellings the parser did NOT know when this set was designed
+# (novel vocabulary). The parser has since learned most of them (CIRCULAR/CIR/
+# CIRC stay unknown on purpose), so these tags now act as regression coverage.
 _NOVEL_TYPE = {
     "CARRERA": ("CARR", "CRRA"),
     "AVENIDA": ("AVDA", "AVEN", "AVE"),
@@ -405,9 +407,9 @@ TRANSFORM_RATIONALE = {
     "unicode_spacing": "Non-breaking spaces or en/em dash instead of '-' (typical of copy/paste from documents).",
     "unicode_symbols": "Full-width '#' or the numero sign; compatibility characters for the same '#'/'No'.",
     "trailing_whitespace": "Leading or trailing blanks/tabs; whitespace is not information.",
-    "novel_type_alias": "Street-type spellings NOT in the parser tables (KR -> CARR/CRRA, AV -> AVDA/AVEN, DG -> DIAG); same street, digits untouched.",
-    "novel_complement_alias": "Unit-word spellings NOT in the parser tables (AP -> APT/APART, LC -> LOC, OF -> OFIC, ED -> EDIF/EDF, BLQ -> BLOQ); same unit, numbers untouched.",
-    "novel_number_word": "'#' written as the word NUMERO; same meaning, not in the parser tables.",
+    "novel_type_alias": "Street-type spellings that were NOT in the parser tables when the set was designed (KR -> CARR/CRRA, AV -> AVDA/AVEN, DG -> DIAG); same street, digits untouched.",
+    "novel_complement_alias": "Unit-word spellings that were NOT in the parser tables when the set was designed (AP -> APT/APART, LC -> LOC, OF -> OFIC, ED -> EDIF/EDF, BLQ -> BLOQ); same unit, numbers untouched.",
+    "novel_number_word": "'#' written as the word NUMERO; same meaning, not in the parser tables when the set was designed.",
 }
 COMBO_RATIONALE = "One structural mutation followed by one or two surface mutations; each preserves identity, so the composition does too."
 

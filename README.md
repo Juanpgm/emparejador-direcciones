@@ -5,6 +5,19 @@ addresses. Given two canonical address strings, it answers **MATCH / NO_MATCH**
 with a confidence score, so different geographic records (parcels, points,
 registries) can be linked by address.
 
+## Requirements and install
+
+**Python 3.12 is required** (developed and tested on 3.12; older versions are
+not supported). The runtime has no third-party dependencies. From a clone:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+`requirements.txt` only lists the test runner; `pyarrow` (evaluation harness
+only) lives in `requirements-dev.txt`.
+
 ## Independence
 
 This project is fully independent: it does not import, read, or otherwise
@@ -39,6 +52,9 @@ grammar also accepts these raw shapes (all present in the real base):
 | Single-letter quadrant | `C 70 B N # 4 C - 104`, `C 1 A BIS O # 81 - 19`, `K 3 A 3 N # 71 H - 13` | `N`->`NORTE`, `S`->`SUR`, `E`->`ESTE`, `O`/`W`->`OESTE` (see below). |
 | Number+letter unit after the plate | `K 49 E # 49 - 50 8 C`, `K 1 D # 46 A - 44 8BC` | opaque complement (see below). |
 | Unregistered tail | `CL 9 # 51 - 46 GASS 5`, `K 8 # 22 - 48 /50 /52` | opaque complement. |
+| Extra via-type / complement spellings | `CARR`/`CRRA`, `AVDA`/`AVEN`/`AVE`, `DIAG`/`DIAGO`, `TRANSV`/`TRV`; `APT`/`APART`, `LOC`, `OFIC`, `EDIF`/`EDF`, `BLOQ` | The same canonical codes as their long forms (`KR`, `AV`, `DG`, `TV`, `AP`, `LC`, `OF`, `ED`, `BLQ`). `CIR`/`CIRC`/`CIRCULAR` are deliberately NOT aliased (circular vs circunvalar is ambiguous). Aliases only match whole tokens: `LOCALIDAD` or `CAPARTIDA` are never rewritten. |
+| `NUMERO` instead of `#` | `CL 5 NUMERO 10 - 20` | Read as `#` only when the address has no other `#`/`NRO`/`No`/`Nº` marker, so `... LOTE NUMERO 3` after a real `#` stays complement text. |
+| Missing `#` (no-`#` form) | `CL 5 10 - 20` | Equals `CL 5 # 10 - 20`, but ONLY for `TYPE N N - N ...`: one via type, one via number, one cross number, a dash and a numeric plate. Any other shape (`KR 26 G 5 73 - 13`, `CL 72 L 3 B NORTE - 14`, `CL 5 BIS 10 - 20`) could be split several ways, so it is never guessed: it stays unparseable (hard veto, score 0). A false MATCH is worse than a miss. |
 
 ### Single-letter quadrant abbreviations
 
@@ -433,6 +449,8 @@ py -3.12 -m venv .venv
 .venv\Scripts\python -m pytest -q
 ```
 
+(Python 3.12 is required, see "Requirements and install".)
+
 Test files:
 
 - `tests/test_parser.py` — cleanup hygiene, grammar happy paths, number
@@ -471,6 +489,15 @@ Test files:
   exit codes, output shape, `--json`, encodings and usage errors.
 - `tests/test_eval_helpers.py` — the pure helpers of the evaluation
   harness, including section H, without pyarrow or the data.
+- `tests/test_parser_vocabulary.py` — the extra via-type/complement aliases,
+  `NUMERO`, the no-`#` form (accepted and deliberately rejected shapes), edge
+  inputs (None/non-str/NBSP/fullwidth/huge), alias-inside-longer-word,
+  idempotence, symmetry and the threshold/dead-band boundary.
+- `tests/test_groundtruth_build.py` — the ground-truth builder: address
+  splitter, every transform, novel-alias tags, strata, determinism.
+- `tests/test_groundtruth_eval.py` — the ground-truth evaluator: label
+  reading (missing `same_door` column, invalid `same_unit`, duplicates,
+  encodings), metrics, thresholds, reports and CLI exit codes.
 
 ## Evaluation against the cadastre
 
