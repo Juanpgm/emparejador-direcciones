@@ -12,6 +12,11 @@ plate (``# 74 -``), a complement sitting in the plate slot (``- LT 20``),
 single-letter quadrants after a street letter (``C 70 B N``) and opaque
 complement tails that are kept as unstructured chunks.
 
+Two recovery rules exist for missing separators, both deliberately narrow:
+``NUMERO`` reads as ``#`` only when the address has no other marker, and an
+address without ``#`` is accepted only as ``TYPE N N - N ...`` (see
+``_restore_missing_hash``); every other missing-``#`` shape stays a failure.
+
 The parser has two layers:
 
 1. ``clean_text`` — trivial text hygiene (uppercasing, accent stripping,
@@ -60,18 +65,27 @@ VIA_TYPES: dict[str, str] = {
     "CARRERA": "KR",
     "CRA": "KR",
     "KRA": "KR",
+    "CARR": "KR",  # also short for "carretera"; absent from the cadastre, revisit if it appears
+    "CRRA": "KR",
     "CR": "KR",
     "K": "KR",
     "AV": "AV",
     "AVENIDA": "AV",
+    "AVDA": "AV",
+    "AVEN": "AV",
+    "AVE": "AV",
     "A": "AV",
     "AC": "AC",
     "AK": "AK",
     "DG": "DG",
     "DIAGONAL": "DG",
+    "DIAG": "DG",
+    "DIAGO": "DG",
     "D": "DG",
     "TV": "TV",
     "TRANSVERSAL": "TV",
+    "TRANSV": "TV",
+    "TRV": "TV",
     "T": "TV",
     "PJ": "PJ",
     "PASAJE": "PJ",
@@ -84,6 +98,11 @@ VIA_TYPES: dict[str, str] = {
     "CT": "CT",
     "CALLEJON": "CT",
 }
+
+# Deliberately NOT aliased: CIR/CIRC (circular vs circunvalar has no single
+# canonical form here). Checked against the real cadastre: none of the aliases
+# above collides with an existing token (they are absent or only ever mean
+# the same word).
 
 # "AVENIDA CALLE" / "AVENIDA CARRERA" are two-word aliases, handled specially
 # in _consume_via_type below because the alias table above is single-token.
@@ -120,11 +139,14 @@ _MAX_TAIL_CHARS = 40
 COMPLEMENT_KINDS: dict[str, str] = {
     "AP": "AP",
     "APTO": "AP",
+    "APT": "AP",
+    "APART": "AP",
     "APARTAMENTO": "AP",
     "TO": "TO",
     "TORRE": "TO",
     "LC": "LC",
     "LOCAL": "LC",
+    "LOC": "LC",
     "CA": "CA",
     "CASA": "CA",
     "ET": "ET",
@@ -132,6 +154,7 @@ COMPLEMENT_KINDS: dict[str, str] = {
     "PISO": "PISO",
     "BLQ": "BLQ",
     "BLOQUE": "BLQ",
+    "BLOQ": "BLQ",
     "BL": "BLQ",
     "MZ": "MZ",
     "MANZANA": "MZ",
@@ -140,8 +163,11 @@ COMPLEMENT_KINDS: dict[str, str] = {
     "PH": "PH",
     "OF": "OF",
     "OFICINA": "OF",
+    "OFIC": "OF",
     "ED": "ED",
     "EDIFICIO": "ED",
+    "EDIF": "ED",
+    "EDF": "ED",
     "CONJ": "CONJ",
     "CONJUNTO": "CONJ",
     "UR": "UR",
@@ -212,7 +238,10 @@ _DEGREE_SIGN = "°"
 
 
 def _map_hash_marker(token: str) -> bool:
-    """Return True when ``token`` is a spelling of ``Nº``/``No.``/``NRO``/``NUM``."""
+    """Return True when ``token`` is a spelling of ``Nº``/``No.``/``NRO``/``NUM``.
+
+    ``NUMERO`` is handled separately in ``clean_text`` (position-sensitive).
+    """
     core = token[:-1] if token.endswith(".") else token
     if core in {"NO", "NRO", "NUM"}:
         return True
@@ -243,6 +272,11 @@ def clean_text(raw: str) -> str:
     text = re.sub(r"\s*#\s*", " # ", text)
     text = re.sub(r"\s*-\s*", " - ", text)
     tokens = text.split()
+    # The word NUMERO is a '#' equivalent only as the FIRST separator of an
+    # address that has no other marker: after a real '#' (or NRO/NO/Nº) it is
+    # plain complement text ("LOTE NUMERO 3") and must not read as a second
+    # address separator.
+    numero_is_marker = not any(t == "#" or _map_hash_marker(t) for t in tokens)
     out_tokens: list[str] = []
     for token in tokens:
         if token in {"#", "-"}:
@@ -250,6 +284,10 @@ def clean_text(raw: str) -> str:
             continue
         if _map_hash_marker(token):
             out_tokens.append("#")
+            continue
+        if numero_is_marker and token in {"NUMERO", "NUMERO."}:
+            out_tokens.append("#")
+            numero_is_marker = False
             continue
         # Strip a trailing dot on an ordinary token (e.g. "CRA." -> "CRA").
         if token.endswith(".") and len(token) > 1:
@@ -572,6 +610,27 @@ def _parse_complement(tokens: list[str]) -> tuple[tuple[str, str], ...]:
     return tuple(sorted(result))
 
 
+def _restore_missing_hash(cleaned: str) -> str | None:
+    """Re-insert the missing ``#`` in ``TYPE N N - N ...``, or return ``None``.
+
+    No-'#' rule: an address written without ``#`` is accepted ONLY when the
+    split between the via and the cross street is unambiguous, i.e. the text
+    starts with one via-type token, exactly one number (the via), exactly one
+    number (the cross), a dash and a numeric plate:
+    ``CL 5 10 - 20`` == ``CL 5 # 10 - 20``. Anything else (letters, BIS,
+    quadrants or more numbers before the dash, e.g. ``KR 26 G 5 73 - 13`` or
+    ``CL 72 L 3 B NORTE - 14``) could be split several ways, so it is never
+    guessed and stays a parse failure (veto): a false MATCH is worse than a
+    miss.
+    """
+    tokens = cleaned.split()
+    if len(tokens) < 5 or tokens[0] not in VIA_TYPES or tokens[3] != "-":
+        return None
+    if not (_NUMBER_RE.match(tokens[1]) and _NUMBER_RE.match(tokens[2]) and _NUMBER_RE.match(tokens[4])):
+        return None
+    return " ".join([tokens[0], tokens[1], "#", *tokens[2:]])
+
+
 def parse_canonical(raw: object) -> CanonicalAddress:
     """Parse ``raw`` against the strict canonical grammar.
 
@@ -600,7 +659,10 @@ def parse_canonical(raw: object) -> CanonicalAddress:
         return CanonicalAddress(raw=raw, parse_ok=False, notes=("multiples_direcciones",))
 
     if "#" not in cleaned:
-        return CanonicalAddress(raw=raw, parse_ok=False, notes=("falta_separador_hash",))
+        restored = _restore_missing_hash(cleaned)
+        if restored is None:
+            return CanonicalAddress(raw=raw, parse_ok=False, notes=("falta_separador_hash",))
+        cleaned = restored
 
     tokens = cleaned.split()
     stream = _TokenStream(tokens)
