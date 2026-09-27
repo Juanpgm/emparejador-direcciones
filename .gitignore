@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.atl/
+*.parquet
+# Real cadastre addresses/NPNs: regenerate with tools/build_groundtruth.py
+data/groundtruth/*
+!data/groundtruth/MANIFEST.json
+data/groundtruth_private/
+data/**/*_labeled*.csv
+result*.json
+r.json
+.vscode/
+.idea/
+*.swp
+.DS_Store
